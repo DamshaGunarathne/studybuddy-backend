@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const Otp = require('../models/Otp');
 const sendEmail = require('../utils/sendEmail'); // You can build this with nodemailer
 const crypto = require('crypto');
+const validator = require('validator');
 
 // JWT generator
 const generateToken = (id) => {
