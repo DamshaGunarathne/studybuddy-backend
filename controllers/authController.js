@@ -1,47 +1,44 @@
 const User = require('../models/User');
 const jwt = require('jsonwebtoken');
 const Otp = require('../models/Otp');
-const sendEmail = require('../utils/sendEmail'); // You can build this with nodemailer
+const sendEmail = require('../utils/sendEmail');
 const crypto = require('crypto');
 const validator = require('validator');
 
-// JWT generator
+// 🔐 Access Token Generator
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, {
     expiresIn: '7d',
   });
 };
 
-// ✅ Register user with validation
+// ✅ Register User
 exports.register = async (req, res) => {
   const { username, email, password } = req.body;
-  console.log('📦 Request Body:', req.body);
+  console.log('📦 Register Request Body:', req.body);
 
-  // 🚨 Basic presence checks
   if (!username || !email || !password) {
     return res.status(400).json({ error: 'All fields are required' });
   }
 
-  // ✉️ Email format validation
   if (!validator.isEmail(email)) {
     return res.status(400).json({ error: 'Invalid email format' });
   }
 
-  // 🔐 Password strength check
-  if (!validator.isStrongPassword(password, { minLength: 6, minLowercase: 1, minUppercase: 1, minNumbers: 1, minSymbols: 0 })) {
+  if (!validator.isStrongPassword(password, {
+    minLength: 6, minLowercase: 1, minUppercase: 1, minNumbers: 1, minSymbols: 0
+  })) {
     return res.status(400).json({
       error: 'Password must include at least 1 uppercase, 1 lowercase, and 1 number',
     });
   }
 
   try {
-    // 🔁 Check for duplicate email
     const userExists = await User.findOne({ email });
     if (userExists) {
       return res.status(400).json({ error: 'Email already in use' });
     }
 
-    // ✅ Create user
     const newUser = await User.create({ username, email, password });
 
     res.status(201).json({
@@ -58,50 +55,49 @@ exports.register = async (req, res) => {
   }
 };
 
-// ✅ Login user
-// ✅ Login user with refresh token
+// ✅ Login User
 exports.login = async (req, res) => {
-  const { email, password } = req.body;
+  console.log("📥 Login Request Body:", req.body);
 
-  // 🚨 Check for empty fields
+  const { email, password } = req.body || {};
+
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
   }
 
-  // ✉️ Validate email format
+  if (typeof email !== 'string' || typeof password !== 'string') {
+    return res.status(400).json({ error: 'Email and password must be strings' });
+  }
+
   if (!validator.isEmail(email)) {
     return res.status(400).json({ error: 'Invalid email format' });
   }
 
   try {
-    // 🔎 Find user
-    const user = await User.findOne({ email });
+    // 🛠️ Get user with password field included
+    const user = await User.findOne({ email }).select('+password');
     if (!user) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // 🔐 Check password
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
 
-    // ✅ Generate tokens
     const accessToken = generateToken(user._id);
     const refreshToken = jwt.sign({ id: user._id }, process.env.REFRESH_SECRET, {
       expiresIn: '30d',
     });
 
-    // 💾 Save refreshToken to DB
     user.refreshToken = refreshToken;
     await user.save();
 
-    // 🍪 Set refresh token as secure cookie
     res.cookie('refreshToken', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'Strict',
-      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
+      maxAge: 30 * 24 * 60 * 60 * 1000,
     });
 
     res.json({
@@ -114,10 +110,12 @@ exports.login = async (req, res) => {
       },
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("❌ Login error:", err);
+    res.status(500).json({ error: err.message || "Something went wrong during login" });
   }
 };
 
+// ✅ Get Current User
 exports.getMe = async (req, res) => {
   res.status(200).json({
     user: {
@@ -127,7 +125,8 @@ exports.getMe = async (req, res) => {
     }
   });
 };
-// ✅ Update user profile
+
+// ✅ Update Profile
 exports.updateUserProfile = async (req, res) => {
   const { username, email, password } = req.body;
 
@@ -137,7 +136,7 @@ exports.updateUserProfile = async (req, res) => {
 
     if (username) user.username = username;
     if (email) user.email = email;
-    if (password) user.password = password; // pre-save hook will hash it
+    if (password) user.password = password;
 
     await user.save();
 
@@ -154,6 +153,7 @@ exports.updateUserProfile = async (req, res) => {
   }
 };
 
+// ✅ Send OTP for Password Reset
 exports.sendOtp = async (req, res) => {
   const { email } = req.body;
 
@@ -173,6 +173,8 @@ exports.sendOtp = async (req, res) => {
     res.status(500).json({ error: 'Failed to send OTP' });
   }
 };
+
+// ✅ Verify OTP & Reset Password
 exports.verifyOtpAndReset = async (req, res) => {
   const { email, code, newPassword } = req.body;
 
@@ -185,13 +187,15 @@ exports.verifyOtpAndReset = async (req, res) => {
 
     user.password = newPassword;
     await user.save();
-    await Otp.deleteOne({ _id: otp._id }); // clean up OTP
+    await Otp.deleteOne({ _id: otp._id });
 
     res.json({ message: 'Password reset successful' });
   } catch (err) {
     res.status(500).json({ error: 'Could not reset password' });
   }
 };
+
+// ✅ Refresh JWT Token
 exports.refreshToken = async (req, res) => {
   const token = req.cookies.refreshToken;
   if (!token) return res.status(401).json({ error: 'Refresh token missing' });
@@ -203,13 +207,12 @@ exports.refreshToken = async (req, res) => {
       return res.status(403).json({ error: 'Invalid refresh token' });
     }
 
-    const newAccessToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '15m' });
+    const newAccessToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: '15m',
+    });
 
     res.json({ token: newAccessToken });
   } catch (err) {
     res.status(401).json({ error: 'Token expired or invalid' });
   }
 };
-
-
-
