@@ -1,6 +1,7 @@
+const dotenv = require('dotenv');
+dotenv.config(); // ✅ load env FIRST
 const express = require('express');
 const mongoose = require('mongoose');
-const dotenv = require('dotenv');
 const taskRoutes = require('./routes/taskRoutes');
 const authRoutes = require('./routes/authRoutes');
 require('./cron/repeatTasks');
